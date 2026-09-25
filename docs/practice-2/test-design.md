@@ -108,9 +108,15 @@
 
 ```text
 pict model.txt > cases.txt
+pict model_cardmanag.txt > cases_cardmanag.txt
 ```
 
-### 3.1 Параметры модели
+| Файл модели | Сервис | Что моделирует | Сгенерированный набор |
+|---|---|---|---|
+| `model.txt` | Authorization | порядок проверок: карта -> статус -> срок действия -> лимиты -> баланс | `cases.txt` |
+| `model_cardmanag.txt` | Card-Management | CRUD-операции, валидация входа, выборка карт | `cases_cardmanag.txt`, 17 строк |
+
+### 3.1 Параметры модели Authorization
 
 | Параметр | Значения | Что моделирует |
 |---|---|---|
@@ -122,7 +128,7 @@ pict model.txt > cases.txt
 | `amount_vs_monthly` | `below`, `equal`, `above` | сумма относительно месячного лимита (шаг 5) |
 | `amount_vs_balance` | `below`, `equal`, `above` | сумма относительно доступного баланса (шаг 6) |
 
-### 3.2 Ограничения модели (constraints)
+### 3.2 Ограничения модели Authorization (constraints)
 
 Порядок проверок в Authorization строгий, поэтому невозможные сочетания исключаются ограничениями: если сработала более ранняя проверка, более поздние (лимиты и баланс) не проверяются.
 
@@ -140,6 +146,37 @@ IF [pan_valid] = "invalid" THEN [amount_vs_daily] = "below"
     AND [amount_vs_monthly] = "below" AND [amount_vs_balance] = "below";
 ```
 
+---
+
+### 3.3 Параметры модели Card-Management
+
+| Параметр | Значения | Что моделирует | Источник |
+|---|---|---|---|
+| `http_method` | `POST`, `GET`, `PATCH` | метод и операция над картой или списком | ТЗ, раздел «CRUD карт» |
+| `target` | `collection`, `single_card` | объект запроса: список карт или карта по PAN | `GET /api/cards` против `GET /api/cards/{pan}` |
+| `card_state` | `absent`, `present_active` | состояние карты на момент запроса | EC-CM-21, EC-CM-22 |
+| `pan_format` | `valid`, `wrong_length`, `wrong_luhn` | формат PAN в пути: 16 цифр и контрольная цифра по алгоритму Луна | BV-CM-01 |
+| `body` | `valid`, `empty`, `unknown_field` | тело запроса: валидное, пустое `{}`, с неизвестным полем | EC-CM-19, EC-CM-20 |
+| `numeric_value` | `positive`, `zero`, `negative` | денежное поле: `dailyLimit`, `monthlyLimit`, `initialBalance` | EC-CM-12, EC-CM-13, EC-CM-16, EC-CM-17 |
+| `query_params` | `valid`, `limit_zero`, `offset_negative`, `status_unknown` | параметры выборки `GET /api/cards`: `limit`, `offset`, `status` | EC-CM-02, EC-CM-04, EC-CM-06, BV-CM-04, BV-CM-05 |
+
+
+### 3.4 Ограничения модели Card-Management
+
+```text
+IF [http_method] = "POST" THEN [target] = "collection";
+IF [http_method] = "POST" THEN [card_state] = "absent"
+    AND [pan_format] = "valid";
+IF [http_method] = "PATCH" THEN [target] = "single_card";
+IF [target] = "collection" THEN [pan_format] = "valid";
+IF [http_method] = "GET" AND [target] = "collection" THEN [card_state] = "present_active";
+IF [http_method] = "GET" THEN [body] = "valid" AND [numeric_value] = "positive";
+IF [target] = "single_card" THEN [query_params] = "valid";
+IF [http_method] <> "GET" THEN [query_params] = "valid";
+IF [pan_format] <> "valid" THEN [body] = "valid" AND [numeric_value] = "positive";
+IF [body] <> "valid" THEN [pan_format] = "valid" AND [numeric_value] = "positive";
+IF [numeric_value] <> "positive" THEN [body] = "valid" AND [pan_format] = "valid";
+```
 ---
 
 ## 4. Тест-кейсы
@@ -186,9 +223,9 @@ IF [pan_valid] = "invalid" THEN [amount_vs_daily] = "below"
 | TC-32 | негативный | BV-CM-05 (OFF ниже) | `offset = -1` | 400 |
 | TC-33 | негативный | BV-CM-01 (OFF ниже) | PAN длиной 15 цифр | 400 |
 
-### 4.2 Тест-кейсы из попарного набора (PICT)
+### 4.2 Тест-кейсы из попарного набора (PICT), модель Authorization
 
-| № строки `cases.txt` | `card_found` | `card_status` | `pan_valid` | `expiry` | `amount_vs_daily` | `amount_vs_monthly` | `amount_vs_balance` | TC ID | Ожидаемый результат |
+| № строки | `card_found` | `card_status` | `pan_valid` | `expiry` | `amount_vs_daily` | `amount_vs_monthly` | `amount_vs_balance` | TC ID | Ожидаемый результат |
 |---|---|---|---|---|---|---|---|---|---|
 | 1 | found | BLOCKED | valid | expired | below | below | below | TC-PW-01 | DECLINED, `CARD_BLOCKED` |
 | 2 | found | INACTIVE | valid | current_month | below | below | below | TC-PW-02 | DECLINED, `CARD_INACTIVE` |
@@ -213,7 +250,31 @@ IF [pan_valid] = "invalid" THEN [amount_vs_daily] = "below"
 | 21 | found | ACTIVE | valid | valid | equal | above | below | TC-PW-21 | DECLINED, `"61"` |
 
 
-### 4.3 Вручную добавленные критичные сочетания
+### 4.3 Тест-кейсы из попарного набора (PICT), модель Card-Management
+
+Набор `pict/cases_cardmanag.txt` по модели `pict/model_cardmanag.txt`: из 1296 комбинаций ограничения оставляют 29 допустимых, набор занимает 17 строк и покрывает все 117 пар значений, допустимых ограничениями. Строк без дефектов: 1; в остальных 16 строках ровно один дефектный вход. Успешные создание и изменение карты (201 и 200) закрыты сочетаниями, добавленными вручную (раздел 4.5).
+
+| № строки `cases_cardmanag.txt` | `http_method` | `target` | `card_state` | `pan_format` | `body` | `numeric_value` | `query_params` | TC ID | Ожидаемый результат |
+|---|---|---|---|---|---|---|---|---|---|
+| 1 | GET | single_card | present_active | valid | valid | positive | valid | TC-PW-CM-01 | 200: карта возвращается, PAN не маскируется (EC-CM-21) |
+| 2 | PATCH | single_card | absent | valid | valid | negative | valid | TC-PW-CM-02 | 400: отрицательный `dailyLimit` - проверка выполняется раньше поиска карты |
+| 3 | POST | collection | absent | valid | empty | positive | valid | TC-PW-CM-03 | 400: пустое тело `{}` |
+| 4 | GET | collection | present_active | valid | valid | positive | offset_negative | TC-PW-CM-04 | 400: `offset = -1` |
+| 5 | PATCH | single_card | present_active | valid | valid | zero | valid | TC-PW-CM-05 | 400: `dailyLimit = 0` |
+| 6 | PATCH | single_card | present_active | valid | empty | positive | valid | TC-PW-CM-06 | 400: пустое тело `{}` |
+| 7 | PATCH | single_card | present_active | wrong_length | valid | positive | valid | TC-PW-CM-07 | 400: PAN длиной 15 цифр |
+| 8 | GET | collection | present_active | valid | valid | positive | status_unknown | TC-PW-CM-08 | 400 либо пустой список (`total = 0`) - уточняется по фактическому API (EC-CM-06) |
+| 9 | PATCH | single_card | present_active | wrong_luhn | valid | positive | valid | TC-PW-CM-09 | 400: PAN не проходит Луну |
+| 10 | POST | collection | absent | valid | unknown_field | positive | valid | TC-PW-CM-10 | 400: неизвестное поле в теле |
+| 11 | POST | collection | absent | valid | valid | zero | valid | TC-PW-CM-11 | 400: `initialBalance = 0` |
+| 12 | GET | single_card | absent | wrong_luhn | valid | positive | valid | TC-PW-CM-12 | 400: PAN не проходит Луну - проверка выполняется раньше поиска карты |
+| 13 | GET | single_card | absent | wrong_length | valid | positive | valid | TC-PW-CM-13 | 400: PAN длиной 15 цифр - проверка выполняется раньше поиска карты |
+| 14 | GET | collection | present_active | valid | valid | positive | limit_zero | TC-PW-CM-14 | 400: `limit = 0` |
+| 15 | PATCH | single_card | present_active | valid | unknown_field | positive | valid | TC-PW-CM-15 | 400: неизвестное поле в теле |
+| 16 | POST | collection | absent | valid | valid | negative | valid | TC-PW-CM-16 | 400: отрицательный `initialBalance` |
+| 17 | PATCH | single_card | present_active | valid | valid | negative | valid | TC-PW-CM-17 | 400: отрицательный `dailyLimit` |
+
+### 4.4 Вручную добавленные критичные сочетания Authorization
 
 Попарное покрытие не гарантирует покрытие троек, поэтому в набор вручную добавляются критичные сочетания:
 
@@ -223,3 +284,12 @@ IF [pan_valid] = "invalid" THEN [amount_vs_daily] = "below"
 | TC-MAN-02 | `card_status = ACTIVE` + `amount_vs_daily = below` + `amount_vs_monthly = above` | DECLINED, `"61"` |
 | TC-MAN-03 | `card_status = ACTIVE` + `amount_vs_daily = below` + `amount_vs_balance = above` | DECLINED, `"51"` |
 | TC-MAN-04 | `expiry = expired` + `amount_vs_balance = below` | DECLINED, `"54"` (срок проверяется раньше баланса) |
+
+### 4.5 Критичные сочетания модели Card-Management
+
+| ID | Сочетание | Ожидаемый результат |
+|---|---|---|
+| TC-MAN-CM-01 | `DELETE` + `card_state = present_active` + `pan_format = valid`, затем `GET /api/cards/{pan}` и `GET /api/cards` | 200 и `status = DELETED`; карта отсутствует и в выдаче по PAN, и в списке |
+| TC-MAN-CM-02 | `POST` + `body = valid` + `numeric_value = positive` | 201, PAN из 16 цифр проходит проверку Луны и уникален, `expiryDate` = текущая дата плюс 3 года |
+| TC-MAN-CM-03 | `PATCH` + `card_state = present_active` + `numeric_value = positive` | 200, `dailyLimit` и `monthlyLimit` обновляются независимо, `availableBalance` не меняется |
+| TC-MAN-CM-04 | `POST` + `body = valid` + `numeric_value = negative` | 400, карта не создана: PAN из запроса не появляется в `GET /api/cards` |
