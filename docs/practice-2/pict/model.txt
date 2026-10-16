@@ -1,0 +1,23 @@
+# Параметры (7)
+card_found:         found, not_found
+card_status:        ACTIVE, INACTIVE, BLOCKED, EXPIRED
+pan_valid:          valid, invalid
+expiry:             valid, current_month, expired
+amount_vs_daily:    below, equal, above
+amount_vs_monthly:  below, equal, above
+amount_vs_balance:  below, equal, above
+
+# Ограничения (constraints).
+# Порядок проверок в Authorization строгий: если сработала более ранняя
+# проверка, более поздние (лимиты и баланс) не выполняются.
+IF [pan_valid] = "invalid" THEN [card_found] = "not_found";
+IF [card_found] = "not_found" THEN [card_status] = "ACTIVE";
+IF [card_found] = "not_found" THEN [expiry] = "valid";
+IF [card_found] = "not_found" THEN [amount_vs_daily] = "below"
+    AND [amount_vs_monthly] = "below" AND [amount_vs_balance] = "below";
+IF [card_status] <> "ACTIVE" THEN [amount_vs_daily] = "below"
+    AND [amount_vs_monthly] = "below" AND [amount_vs_balance] = "below";
+IF [expiry] = "expired" THEN [amount_vs_daily] = "below"
+    AND [amount_vs_monthly] = "below" AND [amount_vs_balance] = "below";
+IF [pan_valid] = "invalid" THEN [amount_vs_daily] = "below"
+    AND [amount_vs_monthly] = "below" AND [amount_vs_balance] = "below";
