@@ -1,0 +1,27 @@
+# Параметры (7)
+http_method:      POST, GET, PATCH
+target:           collection, single_card
+card_state:       absent, present_active
+pan_format:       valid, wrong_length, wrong_luhn
+body:             valid, empty, unknown_field
+numeric_value:    positive, zero, negative
+query_params:     valid, limit_zero, offset_negative, status_unknown
+
+# Ограничения
+IF [http_method] = "POST" THEN [target] = "collection";
+IF [http_method] = "POST" THEN [card_state] = "absent"
+    AND [pan_format] = "valid";
+IF [http_method] = "PATCH" THEN [target] = "single_card";
+IF [target] = "collection" THEN [pan_format] = "valid";
+IF [http_method] = "GET" AND [target] = "collection"
+    THEN [card_state] = "present_active";
+IF [http_method] = "GET" THEN [body] = "valid"
+    AND [numeric_value] = "positive";
+IF [target] = "single_card" THEN [query_params] = "valid";
+IF [http_method] <> "GET" THEN [query_params] = "valid";
+IF [pan_format] <> "valid" THEN [body] = "valid"
+    AND [numeric_value] = "positive";
+IF [body] <> "valid" THEN [pan_format] = "valid"
+    AND [numeric_value] = "positive";
+IF [numeric_value] <> "positive" THEN [body] = "valid"
+    AND [pan_format] = "valid";
