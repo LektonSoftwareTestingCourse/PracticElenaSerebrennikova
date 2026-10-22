@@ -185,111 +185,119 @@ IF [numeric_value] <> "positive" THEN [body] = "valid" AND [pan_format] = "valid
 
 **Правила:** несколько валидных значений допустимо объединять в один кейс; несколько невалидных - нельзя (один невалидный вход на кейс).
 
+
+**Уровень пирамиды.** Колонка «Уровень пирамиды» фиксирует минимальный уровень, на котором кейс проверяется адекватно; уровень определяется объёмом проверки, а не техникой проектирования (классы эквивалентности, границы и попарные наборы дают кейсы всех уровней).
+
+- `unit` - изолированная логика сервиса с моками зависимостей: порядок проверок, маппинг решения в код ответа, статус/срок действия/сравнение суммы с балансом, алгоритм Луна;
+- `api` - контракт HTTP-эндпоинта: статус-код, схема запроса и ответа, валидация входа (400/404), маскирование PAN; реальные БД и соседние сервисы не требуются;
+- `integration` - взаимодействие с реальными зависимостями: БД (`cards`, накопление `limit_usage`), Card Management (резервирование и списание), недоступность соседнего сервиса, RabbitMQ/outbox;
+- `e2e` - сквозной бизнес-сценарий через несколько сервисов и асинхронные подтверждения; для ядра Authorization и Card-Management в этом наборе такие кейсы не выделены.
+
 ### 4.1 Тест-кейсы на основе классов эквивалентности и границ
 
-| ID | Вид | Источник | Входные данные | Ожидаемый результат |
-|---|---|---|---|---|
-| TC-01 | позитивный | EC-AUTH-03 | Активная карта, сумма в пределах лимитов и баланса | APPROVED, `"00"`, `RRN` и `authCode` сгенерированы, баланс уменьшен |
-| TC-02 | негативный | EC-AUTH-02 | PAN из 16 цифр, отсутствующий в CMS | DECLINED, `"14"` |
-| TC-03 | негативный | EC-AUTH-04 | Карта `INACTIVE` | DECLINED, `CARD_INACTIVE` |
-| TC-04 | негативный | EC-AUTH-05 | Карта `BLOCKED` | DECLINED, `CARD_BLOCKED` |
-| TC-05 | негативный | EC-AUTH-06 | Карта `EXPIRED` | DECLINED, `"54"` |
-| TC-06 | негативный | EC-AUTH-08 | `expiryDate` = предыдущий месяц (MMYY) | DECLINED, `"54"` |
-| TC-07 | негативный | EC-AUTH-13 | `usage + amount > dailyLimit` | DECLINED, `"61"` |
-| TC-08 | негативный | EC-AUTH-15 | `mUsage + amount > monthlyLimit` | DECLINED, `"61"` |
-| TC-09 | негативный | EC-AUTH-17 | `amount > availableBalance` | DECLINED, `"51"` |
-| TC-10 | негативный | EC-AUTH-19 | Card Management недоступен | DECLINED, `"05"`, `ISSUER_TIMEOUT` |
-| TC-11 | негативный | EC-AUTH-11 | PAN не проходит алгоритм Луна | DECLINED, `"14"` |
-| TC-12 | негативный | EC-AUTH-10 | PAN длиной 15 цифр | DECLINED, `"12"` |
-| TC-13 | позитивный | EC-AUTH-21 | bin-lookup недоступен | Fallback на `issuerId` из BIN-таблицы, решение выносится |
-| TC-14 | позитивный | BV-AUTH-01 (ON) | `usage + amount = dailyLimit` | APPROVED, `"00"` |
-| TC-15 | негативный | BV-AUTH-01 (OFF выше) | `usage + amount = dailyLimit + 1` | DECLINED, `"61"` |
-| TC-16 | позитивный | BV-AUTH-03 (ON) | `amount = availableBalance` | APPROVED, `"00"`, `availableBalance = 0` |
-| TC-17 | негативный | BV-AUTH-03 (OFF выше) | `amount = availableBalance + 1` | DECLINED, `"51"` |
-| TC-18 | позитивный | BV-AUTH-05 (ON) | `expiryDate` = текущий месяц (MMYY) | Проверки продолжаются |
-| TC-19 | негативный | BV-AUTH-07 | `MMYY = "1126"` при текущем `"1226"` (граница года) | DECLINED, `"54"` |
-| TC-20 | позитивный | EC-CM-09, EC-CM-11 | `bin = 400000`, `initialBalance = 100000000` | 201, PAN из 16 цифр, `status = ACTIVE`, баланс сохранён |
-| TC-21 | негативный | EC-CM-10 | `bin = 40000` (5 цифр) | 400 |
-| TC-22 | негативный | EC-CM-12 | `initialBalance = 0` | 400 |
-| TC-23 | позитивный | EC-CM-14 | `dailyLimit = 15000000` (положительный) | 201, `dailyLimit` сохранён |
-| TC-24 | негативный | EC-CM-16 | `dailyLimit = 0` | 400 |
-| TC-25 | позитивный | EC-CM-15 | `monthlyLimit = 300000000` (положительный) | 201, `monthlyLimit` сохранён |
-| TC-26 | негативный | EC-CM-17 | `monthlyLimit = 0` | 400 |
-| TC-27 | негативный | EC-CM-22 | PAN несуществующей карты | 404 |
-| TC-28 | позитивный | EC-CM-23 | Существующая карта | 200, `status = DELETED`, повторный GET -> 404 |
-| TC-29 | позитивный | EC-CM-25 | `count = 100`, `bins = ["400000",...,"400004"]` | 201, создано 100 карт, распределены по BIN |
-| TC-30 | негативный | EC-CM-26 | `count = 0` | 400 |
-| TC-31 | негативный | BV-CM-04 (OFF ниже) | `limit = 0` | 400 |
-| TC-32 | негативный | BV-CM-05 (OFF ниже) | `offset = -1` | 400 |
-| TC-33 | негативный | BV-CM-01 (OFF ниже) | PAN длиной 15 цифр | 400 |
+| ID | Вид | Источник | Входные данные | Ожидаемый результат | Уровень пирамиды |
+|---|---|---|---|---|---|
+| TC-01 | позитивный | EC-AUTH-03 | Активная карта, сумма в пределах лимитов и баланса | APPROVED, `"00"`, `RRN` и `authCode` сгенерированы, баланс уменьшен | integration |
+| TC-02 | негативный | EC-AUTH-02 | PAN из 16 цифр, отсутствующий в CMS | DECLINED, `"14"` | unit |
+| TC-03 | негативный | EC-AUTH-04 | Карта `INACTIVE` | DECLINED, `CARD_INACTIVE` | unit |
+| TC-04 | негативный | EC-AUTH-05 | Карта `BLOCKED` | DECLINED, `CARD_BLOCKED` | unit |
+| TC-05 | негативный | EC-AUTH-06 | Карта `EXPIRED` | DECLINED, `"54"` | unit |
+| TC-06 | негативный | EC-AUTH-08 | `expiryDate` = предыдущий месяц (MMYY) | DECLINED, `"54"` | unit |
+| TC-07 | негативный | EC-AUTH-13 | `usage + amount > dailyLimit` | DECLINED, `"61"` | integration |
+| TC-08 | негативный | EC-AUTH-15 | `mUsage + amount > monthlyLimit` | DECLINED, `"61"` | integration |
+| TC-09 | негативный | EC-AUTH-17 | `amount > availableBalance` | DECLINED, `"51"` | unit |
+| TC-10 | негативный | EC-AUTH-19 | Card Management недоступен | DECLINED, `"05"`, `ISSUER_TIMEOUT` | integration |
+| TC-11 | негативный | EC-AUTH-11 | PAN не проходит алгоритм Луна | DECLINED, `"14"` | api |
+| TC-12 | негативный | EC-AUTH-10 | PAN длиной 15 цифр | DECLINED, `"12"` | api |
+| TC-13 | позитивный | EC-AUTH-21 | bin-lookup недоступен | Fallback на `issuerId` из BIN-таблицы, решение выносится | integration |
+| TC-14 | позитивный | BV-AUTH-01 (ON) | `usage + amount = dailyLimit` | APPROVED, `"00"` | integration |
+| TC-15 | негативный | BV-AUTH-01 (OFF выше) | `usage + amount = dailyLimit + 1` | DECLINED, `"61"` | integration |
+| TC-16 | позитивный | BV-AUTH-03 (ON) | `amount = availableBalance` | APPROVED, `"00"`, `availableBalance = 0` | integration |
+| TC-17 | негативный | BV-AUTH-03 (OFF выше) | `amount = availableBalance + 1` | DECLINED, `"51"` | unit |
+| TC-18 | позитивный | BV-AUTH-05 (ON) | `expiryDate` = текущий месяц (MMYY) | Проверки продолжаются | unit |
+| TC-19 | негативный | BV-AUTH-07 | `MMYY = "1126"` при текущем `"1226"` (граница года) | DECLINED, `"54"` | unit |
+| TC-20 | позитивный | EC-CM-09, EC-CM-11 | `bin = 400000`, `initialBalance = 100000000` | 201, PAN из 16 цифр, `status = ACTIVE`, баланс сохранён | integration |
+| TC-21 | негативный | EC-CM-10 | `bin = 40000` (5 цифр) | 400 | api |
+| TC-22 | негативный | EC-CM-12 | `initialBalance = 0` | 400 | api |
+| TC-23 | позитивный | EC-CM-14 | `dailyLimit = 15000000` (положительный) | 201, `dailyLimit` сохранён | integration |
+| TC-24 | негативный | EC-CM-16 | `dailyLimit = 0` | 400 | api |
+| TC-25 | позитивный | EC-CM-15 | `monthlyLimit = 300000000` (положительный) | 201, `monthlyLimit` сохранён | integration |
+| TC-26 | негативный | EC-CM-17 | `monthlyLimit = 0` | 400 | api |
+| TC-27 | негативный | EC-CM-22 | PAN несуществующей карты | 404 | api |
+| TC-28 | позитивный | EC-CM-23 | Существующая карта | 200, `status = DELETED`, повторный GET -> 404 | integration |
+| TC-29 | позитивный | EC-CM-25 | `count = 100`, `bins = ["400000",...,"400004"]` | 201, создано 100 карт, распределены по BIN | integration |
+| TC-30 | негативный | EC-CM-26 | `count = 0` | 400 | api |
+| TC-31 | негативный | BV-CM-04 (OFF ниже) | `limit = 0` | 400 | api |
+| TC-32 | негативный | BV-CM-05 (OFF ниже) | `offset = -1` | 400 | api |
+| TC-33 | негативный | BV-CM-01 (OFF ниже) | PAN длиной 15 цифр | 400 | api |
 
 ### 4.2 Тест-кейсы из попарного набора (PICT), модель Authorization
 
-| № строки | `card_found` | `card_status` | `pan_valid` | `expiry` | `amount_vs_daily` | `amount_vs_monthly` | `amount_vs_balance` | TC ID | Ожидаемый результат |
-|---|---|---|---|---|---|---|---|---|---|
-| 1 | found | BLOCKED | valid | expired | below | below | below | TC-PW-01 | DECLINED, `CARD_BLOCKED` |
-| 2 | found | INACTIVE | valid | current_month | below | below | below | TC-PW-02 | DECLINED, `CARD_INACTIVE` |
-| 3 | found | ACTIVE | valid | valid | equal | equal | above | TC-PW-03 | DECLINED, `"51"` |
-| 4 | found | INACTIVE | valid | valid | below | below | below | TC-PW-04 | DECLINED, `CARD_INACTIVE` |
-| 5 | found | BLOCKED | valid | valid | below | below | below | TC-PW-05 | DECLINED, `CARD_BLOCKED` |
-| 6 | found | ACTIVE | valid | current_month | above | below | above | TC-PW-06 | DECLINED, `"61"` |
-| 7 | found | EXPIRED | valid | expired | below | below | below | TC-PW-07 | DECLINED, `"54"` |
-| 8 | found | ACTIVE | valid | valid | below | above | equal | TC-PW-08 | DECLINED, `"61"` |
-| 9 | found | ACTIVE | valid | current_month | equal | below | equal | TC-PW-09 | APPROVED, `"00"` |
-| 10 | found | EXPIRED | valid | current_month | below | below | below | TC-PW-10 | DECLINED, `"54"` |
-| 11 | found | ACTIVE | valid | valid | above | above | below | TC-PW-11 | DECLINED, `"61"` |
-| 12 | found | ACTIVE | valid | expired | below | below | below | TC-PW-12 | DECLINED, `"54"` |
-| 13 | found | ACTIVE | valid | current_month | above | equal | equal | TC-PW-13 | DECLINED, `"61"` |
-| 14 | found | EXPIRED | valid | valid | below | below | below | TC-PW-14 | DECLINED, `"54"` |
-| 15 | found | BLOCKED | valid | current_month | below | below | below | TC-PW-15 | DECLINED, `CARD_BLOCKED` |
-| 16 | found | ACTIVE | valid | valid | below | equal | below | TC-PW-16 | APPROVED, `"00"` |
-| 17 | found | ACTIVE | valid | current_month | below | above | above | TC-PW-17 | DECLINED, `"61"` |
-| 18 | not_found | ACTIVE | valid | valid | below | below | below | TC-PW-18 | DECLINED, `"14"` |
-| 19 | not_found | ACTIVE | invalid | valid | below | below | below | TC-PW-19 | DECLINED, `"14"` |
-| 20 | found | INACTIVE | valid | expired | below | below | below | TC-PW-20 | DECLINED, `CARD_INACTIVE` |
-| 21 | found | ACTIVE | valid | valid | equal | above | below | TC-PW-21 | DECLINED, `"61"` |
+| № строки | `card_found` | `card_status` | `pan_valid` | `expiry` | `amount_vs_daily` | `amount_vs_monthly` | `amount_vs_balance` | TC ID | Ожидаемый результат | Уровень пирамиды |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | found | BLOCKED | valid | expired | below | below | below | TC-PW-01 | DECLINED, `CARD_BLOCKED` | unit |
+| 2 | found | INACTIVE | valid | current_month | below | below | below | TC-PW-02 | DECLINED, `CARD_INACTIVE` | unit |
+| 3 | found | ACTIVE | valid | valid | equal | equal | above | TC-PW-03 | DECLINED, `"51"` | unit |
+| 4 | found | INACTIVE | valid | valid | below | below | below | TC-PW-04 | DECLINED, `CARD_INACTIVE` | unit |
+| 5 | found | BLOCKED | valid | valid | below | below | below | TC-PW-05 | DECLINED, `CARD_BLOCKED` | unit |
+| 6 | found | ACTIVE | valid | current_month | above | below | above | TC-PW-06 | DECLINED, `"61"` | integration |
+| 7 | found | EXPIRED | valid | expired | below | below | below | TC-PW-07 | DECLINED, `"54"` | unit |
+| 8 | found | ACTIVE | valid | valid | below | above | equal | TC-PW-08 | DECLINED, `"61"` | integration |
+| 9 | found | ACTIVE | valid | current_month | equal | below | equal | TC-PW-09 | APPROVED, `"00"` | integration |
+| 10 | found | EXPIRED | valid | current_month | below | below | below | TC-PW-10 | DECLINED, `"54"` | unit |
+| 11 | found | ACTIVE | valid | valid | above | above | below | TC-PW-11 | DECLINED, `"61"` | integration |
+| 12 | found | ACTIVE | valid | expired | below | below | below | TC-PW-12 | DECLINED, `"54"` | unit |
+| 13 | found | ACTIVE | valid | current_month | above | equal | equal | TC-PW-13 | DECLINED, `"61"` | integration |
+| 14 | found | EXPIRED | valid | valid | below | below | below | TC-PW-14 | DECLINED, `"54"` | unit |
+| 15 | found | BLOCKED | valid | current_month | below | below | below | TC-PW-15 | DECLINED, `CARD_BLOCKED` | unit |
+| 16 | found | ACTIVE | valid | valid | below | equal | below | TC-PW-16 | APPROVED, `"00"` | integration |
+| 17 | found | ACTIVE | valid | current_month | below | above | above | TC-PW-17 | DECLINED, `"61"` | integration |
+| 18 | not_found | ACTIVE | valid | valid | below | below | below | TC-PW-18 | DECLINED, `"14"` | unit |
+| 19 | not_found | ACTIVE | invalid | valid | below | below | below | TC-PW-19 | DECLINED, `"14"` | unit |
+| 20 | found | INACTIVE | valid | expired | below | below | below | TC-PW-20 | DECLINED, `CARD_INACTIVE` | unit |
+| 21 | found | ACTIVE | valid | valid | equal | above | below | TC-PW-21 | DECLINED, `"61"` | integration |
 
 
 ### 4.3 Тест-кейсы из попарного набора (PICT), модель Card-Management
 
 Набор `pict/cases_cardmanag.txt` по модели `pict/model_cardmanag.txt`: из 1296 комбинаций ограничения оставляют 29 допустимых, набор занимает 17 строк и покрывает все 117 пар значений, допустимых ограничениями. Строк без дефектов: 1; в остальных 16 строках ровно один дефектный вход. Успешные создание и изменение карты (201 и 200) закрыты сочетаниями, добавленными вручную (раздел 4.5).
 
-| № строки `cases_cardmanag.txt` | `http_method` | `target` | `card_state` | `pan_format` | `body` | `numeric_value` | `query_params` | TC ID | Ожидаемый результат |
-|---|---|---|---|---|---|---|---|---|---|
-| 1 | GET | single_card | present_active | valid | valid | positive | valid | TC-PW-CM-01 | 200: карта возвращается, PAN не маскируется (EC-CM-21) |
-| 2 | PATCH | single_card | absent | valid | valid | negative | valid | TC-PW-CM-02 | 400: отрицательный `dailyLimit` - проверка выполняется раньше поиска карты |
-| 3 | POST | collection | absent | valid | empty | positive | valid | TC-PW-CM-03 | 400: пустое тело `{}` |
-| 4 | GET | collection | present_active | valid | valid | positive | offset_negative | TC-PW-CM-04 | 400: `offset = -1` |
-| 5 | PATCH | single_card | present_active | valid | valid | zero | valid | TC-PW-CM-05 | 400: `dailyLimit = 0` |
-| 6 | PATCH | single_card | present_active | valid | empty | positive | valid | TC-PW-CM-06 | 400: пустое тело `{}` |
-| 7 | PATCH | single_card | present_active | wrong_length | valid | positive | valid | TC-PW-CM-07 | 400: PAN длиной 15 цифр |
-| 8 | GET | collection | present_active | valid | valid | positive | status_unknown | TC-PW-CM-08 | 400 либо пустой список (`total = 0`) - уточняется по фактическому API (EC-CM-06) |
-| 9 | PATCH | single_card | present_active | wrong_luhn | valid | positive | valid | TC-PW-CM-09 | 400: PAN не проходит Луну |
-| 10 | POST | collection | absent | valid | unknown_field | positive | valid | TC-PW-CM-10 | 400: неизвестное поле в теле |
-| 11 | POST | collection | absent | valid | valid | zero | valid | TC-PW-CM-11 | 400: `initialBalance = 0` |
-| 12 | GET | single_card | absent | wrong_luhn | valid | positive | valid | TC-PW-CM-12 | 400: PAN не проходит Луну - проверка выполняется раньше поиска карты |
-| 13 | GET | single_card | absent | wrong_length | valid | positive | valid | TC-PW-CM-13 | 400: PAN длиной 15 цифр - проверка выполняется раньше поиска карты |
-| 14 | GET | collection | present_active | valid | valid | positive | limit_zero | TC-PW-CM-14 | 400: `limit = 0` |
-| 15 | PATCH | single_card | present_active | valid | unknown_field | positive | valid | TC-PW-CM-15 | 400: неизвестное поле в теле |
-| 16 | POST | collection | absent | valid | valid | negative | valid | TC-PW-CM-16 | 400: отрицательный `initialBalance` |
-| 17 | PATCH | single_card | present_active | valid | valid | negative | valid | TC-PW-CM-17 | 400: отрицательный `dailyLimit` |
+| № строки `cases_cardmanag.txt` | `http_method` | `target` | `card_state` | `pan_format` | `body` | `numeric_value` | `query_params` | TC ID | Ожидаемый результат | Уровень пирамиды |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | GET | single_card | present_active | valid | valid | positive | valid | TC-PW-CM-01 | 200: карта возвращается, PAN не маскируется (EC-CM-21) | api |
+| 2 | PATCH | single_card | absent | valid | valid | negative | valid | TC-PW-CM-02 | 400: отрицательный `dailyLimit` - проверка выполняется раньше поиска карты | api |
+| 3 | POST | collection | absent | valid | empty | positive | valid | TC-PW-CM-03 | 400: пустое тело `{}` | api |
+| 4 | GET | collection | present_active | valid | valid | positive | offset_negative | TC-PW-CM-04 | 400: `offset = -1` | api |
+| 5 | PATCH | single_card | present_active | valid | valid | zero | valid | TC-PW-CM-05 | 400: `dailyLimit = 0` | api |
+| 6 | PATCH | single_card | present_active | valid | empty | positive | valid | TC-PW-CM-06 | 400: пустое тело `{}` | api |
+| 7 | PATCH | single_card | present_active | wrong_length | valid | positive | valid | TC-PW-CM-07 | 400: PAN длиной 15 цифр | api |
+| 8 | GET | collection | present_active | valid | valid | positive | status_unknown | TC-PW-CM-08 | 400 либо пустой список (`total = 0`) - уточняется по фактическому API (EC-CM-06) | api |
+| 9 | PATCH | single_card | present_active | wrong_luhn | valid | positive | valid | TC-PW-CM-09 | 400: PAN не проходит Луну | api |
+| 10 | POST | collection | absent | valid | unknown_field | positive | valid | TC-PW-CM-10 | 400: неизвестное поле в теле | api |
+| 11 | POST | collection | absent | valid | valid | zero | valid | TC-PW-CM-11 | 400: `initialBalance = 0` | api |
+| 12 | GET | single_card | absent | wrong_luhn | valid | positive | valid | TC-PW-CM-12 | 400: PAN не проходит Луну - проверка выполняется раньше поиска карты | api |
+| 13 | GET | single_card | absent | wrong_length | valid | positive | valid | TC-PW-CM-13 | 400: PAN длиной 15 цифр - проверка выполняется раньше поиска карты | api |
+| 14 | GET | collection | present_active | valid | valid | positive | limit_zero | TC-PW-CM-14 | 400: `limit = 0` | api |
+| 15 | PATCH | single_card | present_active | valid | unknown_field | positive | valid | TC-PW-CM-15 | 400: неизвестное поле в теле | api |
+| 16 | POST | collection | absent | valid | valid | negative | valid | TC-PW-CM-16 | 400: отрицательный `initialBalance` | api |
+| 17 | PATCH | single_card | present_active | valid | valid | negative | valid | TC-PW-CM-17 | 400: отрицательный `dailyLimit` | api |
 
 ### 4.4 Вручную добавленные критичные сочетания Authorization
 
 Попарное покрытие не гарантирует покрытие троек, поэтому в набор вручную добавляются критичные сочетания:
 
-| ID | Сочетание | Ожидаемый результат |
-|---|---|---|
-| TC-MAN-01 | `card_status = ACTIVE` + `amount_vs_daily = above` + `amount_vs_balance = below` | DECLINED, `"61"` (лимит проверяется раньше баланса) |
-| TC-MAN-02 | `card_status = ACTIVE` + `amount_vs_daily = below` + `amount_vs_monthly = above` | DECLINED, `"61"` |
-| TC-MAN-03 | `card_status = ACTIVE` + `amount_vs_daily = below` + `amount_vs_balance = above` | DECLINED, `"51"` |
-| TC-MAN-04 | `expiry = expired` + `amount_vs_balance = below` | DECLINED, `"54"` (срок проверяется раньше баланса) |
+| ID | Сочетание | Ожидаемый результат | Уровень пирамиды |
+|---|---|---|---|
+| TC-MAN-01 | `card_status = ACTIVE` + `amount_vs_daily = above` + `amount_vs_balance = below` | DECLINED, `"61"` (лимит проверяется раньше баланса) | integration |
+| TC-MAN-02 | `card_status = ACTIVE` + `amount_vs_daily = below` + `amount_vs_monthly = above` | DECLINED, `"61"` | integration |
+| TC-MAN-03 | `card_status = ACTIVE` + `amount_vs_daily = below` + `amount_vs_balance = above` | DECLINED, `"51"` | unit |
+| TC-MAN-04 | `expiry = expired` + `amount_vs_balance = below` | DECLINED, `"54"` (срок проверяется раньше баланса) | unit |
 
 ### 4.5 Критичные сочетания модели Card-Management
 
-| ID | Сочетание | Ожидаемый результат |
-|---|---|---|
-| TC-MAN-CM-01 | `DELETE` + `card_state = present_active` + `pan_format = valid`, затем `GET /api/cards/{pan}` и `GET /api/cards` | 200 и `status = DELETED`; карта отсутствует и в выдаче по PAN, и в списке |
-| TC-MAN-CM-02 | `POST` + `body = valid` + `numeric_value = positive` | 201, PAN из 16 цифр проходит проверку Луны и уникален, `expiryDate` = текущая дата плюс 3 года |
-| TC-MAN-CM-03 | `PATCH` + `card_state = present_active` + `numeric_value = positive` | 200, `dailyLimit` и `monthlyLimit` обновляются независимо, `availableBalance` не меняется |
-| TC-MAN-CM-04 | `POST` + `body = valid` + `numeric_value = negative` | 400, карта не создана: PAN из запроса не появляется в `GET /api/cards` |
+| ID | Сочетание | Ожидаемый результат | Уровень пирамиды |
+|---|---|---|---|
+| TC-MAN-CM-01 | `DELETE` + `card_state = present_active` + `pan_format = valid`, затем `GET /api/cards/{pan}` и `GET /api/cards` | 200 и `status = DELETED`; карта отсутствует и в выдаче по PAN, и в списке | integration |
+| TC-MAN-CM-02 | `POST` + `body = valid` + `numeric_value = positive` | 201, PAN из 16 цифр проходит проверку Луны и уникален, `expiryDate` = текущая дата плюс 3 года | integration |
+| TC-MAN-CM-03 | `PATCH` + `card_state = present_active` + `numeric_value = positive` | 200, `dailyLimit` и `monthlyLimit` обновляются независимо, `availableBalance` не меняется | integration |
+| TC-MAN-CM-04 | `POST` + `body = valid` + `numeric_value = negative` | 400, карта не создана: PAN из запроса не появляется в `GET /api/cards` | integration |
