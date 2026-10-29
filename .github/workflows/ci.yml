@@ -1,6 +1,6 @@
 name: CI Pipeline
 
-# Каждый студент работает в своём отдельном репозитории (Practic{Имя}{Фамилия}).
+# Каждый  студент работает в своём отдельном репозитории (Practic{Имя}{Фамилия}).
 # Это ЛЁГКИЙ пайплайн: он гоняется на каждый push и проверяет только линтеры,
 # компиляцию Java-модулей и сборку frontend. Секреты и вход в registry не требуются.
 #
@@ -89,8 +89,16 @@ jobs:
     - name: Run java linter
       run: mvn -f services/pom.xml -P${{ matrix.service }} checkstyle:check
 
-    - name: Build services (tests skipped until students add them)
-      run: mvn -f services/pom.xml -P${{ matrix.service }} install -Dcheckstyle.skip=true -DskipTests
+    - name: Verify services and run unit tests
+      run: mvn -B -f services/pom.xml -P${{ matrix.service }} verify -Dcheckstyle.skip=true
+
+    - name: Upload JaCoCo report
+      if: always() && contains(fromJSON('["gateway", "switch", "authorization", "card-management"]'), matrix.service)
+      uses: actions/upload-artifact@v4
+      with:
+        name: jacoco-report-${{ matrix.service }}
+        path: services/${{ matrix.service }}/target/site/jacoco/
+        if-no-files-found: error
 
   frontend-dashboard:
     runs-on: ubuntu-latest
