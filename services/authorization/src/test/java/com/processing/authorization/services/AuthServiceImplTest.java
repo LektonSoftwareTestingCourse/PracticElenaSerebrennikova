@@ -50,7 +50,7 @@ class AuthServiceImplTest {
         stubCard(CardModelStatus.ACTIVE, YearMonth.of(2026, 10));
         when(limits.upsertLimitUsage(any(), any(), any(), any(), any())).thenReturn(1);
         // Act
-        AuthorizationResponse actual = service.authorize(request(amount), Instant.now());
+        AuthorizationResponse actual = service.authorize(request(amount), TRANSMISSION_TIME);
         // Assert
         assertThat(actual.status()).isEqualTo(status);
         assertThat(actual.responseCode()).isEqualTo(code);
@@ -62,7 +62,7 @@ class AuthServiceImplTest {
         // Arrange
         stubCard(CardModelStatus.ACTIVE, YearMonth.of(2026, 10));
         // Act
-        AuthorizationResponse actual = service.authorize(request("1001"), Instant.now());
+        AuthorizationResponse actual = service.authorize(request("1001"), TRANSMISSION_TIME);
         // Assert
         assertDecline(actual, "INSUFFICIENT_FUNDS", "51");
         verify(cards, never()).reserve(any(), any(), any());
@@ -75,7 +75,7 @@ class AuthServiceImplTest {
         stubCard(CardModelStatus.ACTIVE, YearMonth.of(2026, 10));
         when(limits.upsertLimitUsage(any(), any(), any(), any(), any())).thenReturn(1);
         // Act
-        AuthorizationResponse actual = service.authorize(request("1000"), Instant.now());
+        AuthorizationResponse actual = service.authorize(request("1000"), TRANSMISSION_TIME);
         // Assert
         assertThat(actual.status()).isEqualTo("APPROVED");
         assertThat(actual.rrn()).matches("\\d{12}");
@@ -90,7 +90,7 @@ class AuthServiceImplTest {
         // Arrange
         stubCard(status, YearMonth.of(2026, 10));
         // Act
-        AuthorizationResponse actual = service.authorize(request("1000"), Instant.now());
+        AuthorizationResponse actual = service.authorize(request("1000"), TRANSMISSION_TIME);
         // Assert
         assertDecline(actual, reason, code);
         verify(cards, never()).reserve(any(), any(), any());
@@ -102,7 +102,7 @@ class AuthServiceImplTest {
         // Arrange
         stubCard(CardModelStatus.ACTIVE, YearMonth.of(2026, 9));
         // Act
-        AuthorizationResponse actual = service.authorize(request("1000"), Instant.now());
+        AuthorizationResponse actual = service.authorize(request("1000"), TRANSMISSION_TIME);
         // Assert
         assertDecline(actual, "CARD_EXPIRED", "54");
         verify(cards, never()).reserve(any(), any(), any());
@@ -113,7 +113,7 @@ class AuthServiceImplTest {
         // Arrange
         when(cards.getCard(PAN)).thenThrow(new CardNotFoundException(PAN));
         // Act
-        AuthorizationResponse actual = service.authorize(request("1000"), Instant.now());
+        AuthorizationResponse actual = service.authorize(request("1000"), TRANSMISSION_TIME);
         // Assert
         assertDecline(actual, "CARD_NOT_FOUND", "14");
         verify(events).notify(any(AuthServiceAuthDeclineNoCardEvent.class));
@@ -125,7 +125,7 @@ class AuthServiceImplTest {
         stubCard(CardModelStatus.ACTIVE, YearMonth.of(2026, 10));
         when(limits.upsertLimitUsage(any(), any(), any(), any(), any())).thenReturn(0);
         // Act
-        AuthorizationResponse actual = service.authorize(request("1000"), Instant.now());
+        AuthorizationResponse actual = service.authorize(request("1000"), TRANSMISSION_TIME);
         // Assert
         assertDecline(actual, "EXCEEDS_AMOUNT_LIMIT", "61");
         verify(cards, never()).reserve(any(), any(), any());
@@ -138,7 +138,7 @@ class AuthServiceImplTest {
         when(limits.upsertLimitUsage(any(), any(), any(), any(), any()))
                 .thenThrow(new DuplicateKeyException("collision")).thenReturn(1);
         // Act
-        AuthorizationResponse actual = service.authorize(request("1000"), Instant.now());
+        AuthorizationResponse actual = service.authorize(request("1000"), TRANSMISSION_TIME);
         // Assert
         assertThat(actual.status()).isEqualTo("APPROVED");
         verify(cards).reserve(new BigDecimal("1000"), actual.rrn(), PAN);
@@ -152,7 +152,7 @@ class AuthServiceImplTest {
         when(limits.upsertLimitUsage(any(), any(), any(), any(), any()))
                 .thenThrow(new IllegalStateException("database down"));
         // Act
-        AuthorizationResponse actual = service.authorize(request("1000"), Instant.now());
+        AuthorizationResponse actual = service.authorize(request("1000"), TRANSMISSION_TIME);
         // Assert
         assertDecline(actual, "DB_UNAVAILABLE", "96");
         verify(cards, never()).reserve(any(), any(), any());
