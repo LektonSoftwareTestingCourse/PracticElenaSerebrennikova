@@ -92,4 +92,3 @@
 - [ ] `GET /api/dashboard/recent` отдаёт последние транзакции
 - [ ] WebSocket (`/ws/transactions`) транслирует поток транзакций в реальном времени
 - [ ] Поиск транзакций (`GET /api/transactions/search`) находит транзакцию по `rrn`
-
