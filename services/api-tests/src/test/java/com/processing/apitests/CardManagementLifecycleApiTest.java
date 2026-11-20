@@ -39,13 +39,17 @@ class CardManagementLifecycleApiTest {
     @Test
     void reservesAndRollsBackFunds() {
         String pan = createCard();
+        int balanceBefore = ApiSupport.request().when().get("/api/cards/{pan}", pan)
+                .then().statusCode(200).extract().path("availableBalance");
         String rrn = "123456789012";
         String operation = "{\"amount\":100,\"rrn\":\"" + rrn + "\"}";
 
         ApiSupport.request().body(operation).when().post("/api/cards/{pan}/reserve", pan)
-                .then().statusCode(200).body("pan", equalTo(pan));
+                .then().statusCode(200).body("pan", equalTo(pan))
+                .body("availableBalance", equalTo(balanceBefore - 100));
         ApiSupport.request().body(operation).when().post("/api/cards/{pan}/rollback", pan)
-                .then().statusCode(200).body("pan", equalTo(pan));
+                .then().statusCode(200).body("pan", equalTo(pan))
+                .body("availableBalance", equalTo(balanceBefore));
     }
 
     @Test
